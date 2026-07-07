@@ -13,9 +13,16 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests pynacl
-      - name: Device flow OAuth
+      - name: Pedir código (míralo en el Summary del run)
+        id: req
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+        run: python scripts/authorize.py --request
+      - name: Esperar autorización y guardar token
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           GH_PAT: ${{ secrets.GH_PAT }}
-        run: python scripts/authorize.py
+          DEVICE_CODE: ${{ steps.req.outputs.device_code }}
+          POLL_INTERVAL: ${{ steps.req.outputs.interval }}
+        run: python scripts/authorize.py --poll
