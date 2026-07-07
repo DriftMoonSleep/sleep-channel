@@ -1,0 +1,27 @@
+name: Probar avisos (email + WhatsApp)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests PyYAML
+      - name: Mensaje de prueba
+        run: |
+          mkdir -p out
+          printf 'PRUEBA de avisos — Driftmoon Sleep funcionando ✅\nhttps://www.youtube.com/@DriftMoonSleep\n' > out/last_upload.txt
+      - name: Probar email
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python scripts/notify.py email
+      - name: Probar WhatsApp
+        env:
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+        run: python scripts/notify.py whatsapp
