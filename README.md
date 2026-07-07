@@ -134,3 +134,8 @@ Vídeo diario → Run workflow (puedes forzar `theme` y `hours`).
 - Temas y duraciones: listas `themes` y `hours_pool`.
 - Pantalla negra: `black_screen_minutes` (0 = desactivada).
 - Hora/frecuencia de publicación: `cron` en `.github/workflows/daily.yml` (UTC).
+
+
+---
+
+Este proyecto usa **YouTube API Services**: [Privacy Policy](./PRIVACY.md) · [Terms of Service](./TERMS.md) · [YouTube Terms of Service](https://www.youtube.com/t/terms) · [Google Privacy Policy](https://policies.google.com/privacy)
