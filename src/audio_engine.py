@@ -9,6 +9,8 @@ lluvia+truenos, chimenea, lluvia+chimenea, grillos nocturnos.
 """
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 from scipy import signal
 
@@ -73,15 +75,16 @@ def brown_noise(n: int, rng: np.random.Generator) -> np.ndarray:
     return _norm(b)
 
 
-def rain(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Lluvia: lecho de ruido + gotas individuales dispersas."""
-    bed_hi = bandpass(_white(n, rng), 1500, 9000) * 0.95      # hiss = carácter lluvia
-    bed_lo = bandpass(_white(n, rng), 150, 700) * 0.40         # cuerpo/rumor
+def rain(n: int, rng: np.random.Generator, intensity: float = 1.0) -> np.ndarray:
+    """Lluvia con intensidad regulable: 0.5≈llovizna, 1.0≈lluvia, 1.3≈tormenta."""
+    bed_hi = bandpass(_white(n, rng), 1500, 9000) * 0.95
+    bed_lo = bandpass(_white(n, rng), 150, 700) * 0.42 * intensity ** 1.6
     bed = bed_hi + bed_lo
-    bed *= _slow_env(n, rng, 0.05, floor=0.75)                 # intensidad variable
+    # suelo alto: nada de "huecos" de volumen perceptibles
+    bed *= _slow_env(n, rng, 0.05, floor=0.88)
 
     drops = np.zeros(n, dtype=np.float32)
-    rate = rng.uniform(12, 20)                                 # gotas audibles/seg
+    rate = rng.uniform(12, 20) * intensity                     # gotas audibles/seg
     k = int(n / SR * rate)
     for _ in range(k):
         dur = int(SR * rng.uniform(0.004, 0.03))
@@ -99,7 +102,7 @@ def rain(n: int, rng: np.random.Generator) -> np.ndarray:
 def ocean(n: int, rng: np.random.Generator) -> np.ndarray:
     """Olas: ruido con envolventes lentas + rompiente esporádica."""
     base = lowpass(_white(n, rng), 900)
-    swell = _slow_env(n, rng, rng.uniform(0.06, 0.11), floor=0.25) ** 1.6
+    swell = _slow_env(n, rng, rng.uniform(0.06, 0.11), floor=0.42) ** 1.6
     wash = bandpass(_white(n, rng), 800, 4000)
     crash_env = np.clip(swell - 0.55, 0, None) * 2.2           # solo en las crestas
     x = base * swell + wash * crash_env
@@ -142,7 +145,7 @@ def pads(n: int, rng: np.random.Generator) -> np.ndarray:
     for ci, chord in enumerate(seq):
         pos = (t - ci * hold) % total
         env = np.clip(np.minimum(pos / xf, (hold + xf - pos) / xf), 0, 1)
-        env = (env ** 2).astype(np.float32)
+        env = np.sqrt(env).astype(np.float32)  # crossfade equal-power: sin valles
         for st in chord:
             f = root * 2 ** (st / 12)
             for det in (1.0, 1.0 + rng.uniform(0.001, 0.002), 1.0 - rng.uniform(0.001, 0.002)):
@@ -180,9 +183,9 @@ def thunder(n: int, rng: np.random.Generator) -> np.ndarray:
         attack = 1 - np.exp(-tt / (SR * rng.uniform(0.06, 0.25)))
         decay = np.exp(-tt / (dur * rng.uniform(0.20, 0.32)))
         low = lowpass(rng.standard_normal(dur).astype(np.float32),
-                      rng.uniform(70, 130))
+                      rng.uniform(80, 150))
         mid = bandpass(rng.standard_normal(dur).astype(np.float32),
-                       150, 450, order=2)
+                       200, 900, order=2)
         r = (low + mid * brightness) * attack * decay
         return _norm(r, -13)
 
@@ -190,13 +193,13 @@ def thunder(n: int, rng: np.random.Generator) -> np.ndarray:
     while t_pos < n - SR * 16:
         i = int(t_pos)
         dur = int(SR * rng.uniform(3.5, 7))
-        main = _one_rumble(dur, rng.uniform(0.5, 0.8))
+        main = _one_rumble(dur, rng.uniform(0.9, 1.3))
         # chasquido inicial casi siempre (es lo que "anuncia" el trueno)
         if rng.random() < 0.85:
             cd = int(SR * rng.uniform(0.2, 0.5))
             ce = np.exp(-np.arange(cd, dtype=np.float32) / (cd * 0.3))
             crack = bandpass(rng.standard_normal(cd).astype(np.float32),
-                             250, 1400, order=2) * ce
+                             300, 1800, order=2) * ce
             main[:cd] += _norm(crack, -15)[:cd] * 0.7
         out[i:i + dur] += main * rng.uniform(0.7, 1.0)
         # eco rodante: segundo retumbo más suave 1.5-3.5 s después
@@ -205,14 +208,14 @@ def thunder(n: int, rng: np.random.Generator) -> np.ndarray:
             dur2 = int(SR * rng.uniform(2.5, 5))
             j = i + gap
             if j + dur2 < n:
-                out[j:j + dur2] += _one_rumble(dur2, rng.uniform(0.3, 0.5)) * rng.uniform(0.35, 0.55)
+                out[j:j + dur2] += _one_rumble(dur2, rng.uniform(0.5, 0.8)) * rng.uniform(0.35, 0.55)
         t_pos += rng.uniform(18, 55) * SR
     return np.clip(out, -1, 1)
 
 
-def fireplace(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Hoguera: roar de llama con flutter + crujidos resonantes con cuerpo
-    (senos amortiguados, no impulsos) + pops graves ocasionales."""
+def wind_drizzle(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Viento con gotas dispersas (nació como 'chimenea', el oído dictó otra
+    cosa y el sonido se aprovecha tal cual: brisa + goteo suave)."""
     # llama: rumor grave con aleteo lento característico
     flame = lowpass(_white(n, rng), 380)
     t = np.arange(n, dtype=np.float32) / SR
@@ -288,16 +291,17 @@ def crickets(n: int, rng: np.random.Generator) -> np.ndarray:
 # Temas (recetas de mezcla)
 # ----------------------------------------------------------------------
 THEMES = {
-    "gentle_rain":    [(rain, 0.90), (brown_noise, 0.22)],
-    "ocean_waves":    [(ocean, 0.90), (wind, 0.18)],
+    "light_rain":     [(partial(rain, intensity=0.55), 1.00)],
+    "gentle_rain":    [(partial(rain, intensity=0.85), 0.95), (brown_noise, 0.18)],
+    "thunder_rain":   [(partial(rain, intensity=1.20), 1.00), (thunder, 1.25),
+                       (brown_noise, 0.10)],
+    "ocean_waves":    [(ocean, 0.90), (wind, 0.18), (brown_noise, 0.32)],
     "deep_brown":     [(brown_noise, 1.00)],
     "night_wind":     [(wind, 0.85), (brown_noise, 0.30)],
-    "dream_pads":     [(pads, 0.95), (brown_noise, 0.12)],
-    "rain_and_pads":  [(rain, 0.55), (pads, 0.60)],
-    "thunder_rain":   [(rain, 1.00), (thunder, 1.10), (brown_noise, 0.10)],
-    "fireplace":      [(fireplace, 1.00)],
-    "rain_fireplace": [(rain, 0.55), (fireplace, 0.75)],
-    "crickets_night": [(crickets, 0.60), (wind, 0.25), (brown_noise, 0.25)],
+    "dream_pads":     [(pads, 0.95), (brown_noise, 0.18)],
+    "rain_and_pads":  [(partial(rain, intensity=0.85), 0.60), (pads, 0.60), (brown_noise, 0.15)],
+    "wind_drizzle":   [(wind_drizzle, 1.00)],
+    "crickets_night": [(crickets, 0.60), (wind, 0.30), (brown_noise, 0.38)],
 }
 
 

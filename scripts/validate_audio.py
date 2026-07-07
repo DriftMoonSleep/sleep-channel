@@ -72,6 +72,15 @@ def validate(minutes: float = 2.0, only: list[str] | None = None) -> bool:
         maxdif = float(np.max(np.abs(np.diff(mono))))
 
         problems = []
+        # continuidad: ninguna ventana de 1 s puede caer >5 dB bajo el RMS global
+        win = SR
+        n_w = len(mono) // win
+        w_rms = np.sqrt(np.mean(mono[:n_w * win].reshape(n_w, win) ** 2, axis=1))
+        min_db = 20 * np.log10(np.min(w_rms) + 1e-12)
+        # las olas viven del vaivén: umbral propio más laxo
+        cont_limit = {"ocean_waves": 8.0}.get(theme, 5.0)
+        if min_db < rms - cont_limit:
+            problems.append(f"hueco de sonido (ventana mínima {min_db:.1f} dB)")
         if not (-23.5 < rms < -18.5):
             problems.append(f"RMS fuera de rango ({rms:.1f})")
         if peak > 0.92:
@@ -98,7 +107,7 @@ def validate(minutes: float = 2.0, only: list[str] | None = None) -> bool:
             extra += f"medios150-450={mid:.0%} "
             if mid < 0.05:
                 problems.append("truenos inaudibles en altavoces pequeños")
-        if theme == "fireplace":
+        if theme == "__disabled__":
             body = band_energy(mono, 40, 500)
             extra += f"cuerpo<500={body:.0%} "
             if body < 0.40:

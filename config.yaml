@@ -14,11 +14,11 @@ black_screen_minutes: 10 # el vídeo se funde a negro en este minuto (0 = nunca)
 # Rotación de temas (ejecución N → tema N % len)
 themes:
   - gentle_rain
-  - fireplace
+  - wind_drizzle
   - ocean_waves
   - thunder_rain
   - deep_brown
-  - rain_fireplace
+  - light_rain
   - dream_pads
   - crickets_night
   - night_wind
