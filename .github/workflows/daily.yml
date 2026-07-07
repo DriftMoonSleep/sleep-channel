@@ -54,6 +54,18 @@ jobs:
           gh issue create -R "$GITHUB_REPOSITORY" \
             --title "📼 Publicar: $TITLE" \
             --body "Vídeo subido en privado: $URL — Publícalo desde YouTube Studio (visibilidad → Público) y cierra esta issue."
+      - name: Aviso por email (opcional, requiere GMAIL_APP_PASSWORD)
+        if: ${{ success() && github.event.inputs.skip_upload != '1' }}
+        continue-on-error: true
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python scripts/notify.py email
+      - name: Aviso por WhatsApp (opcional, requiere CALLMEBOT_APIKEY)
+        if: ${{ success() && github.event.inputs.skip_upload != '1' }}
+        continue-on-error: true
+        env:
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+        run: python scripts/notify.py whatsapp
       - name: Guardar muestras descargables (solo modo prueba)
         if: ${{ github.event.inputs.skip_upload == '1' }}
         uses: actions/upload-artifact@v4

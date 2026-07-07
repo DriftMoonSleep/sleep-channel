@@ -4,6 +4,11 @@ handle: "@driftmoonsleep"
 email_sugerido: driftmoonsleep@gmail.com
 tagline: "Rain · Ocean · Deep-Sleep Soundscapes"
 
+# Avisos cuando se sube un vídeo (los secrets los activan)
+notify_from: driftmoonsleep@gmail.com
+notify_email: sergiman03@gmail.com
+notify_phone: "+34722768060"
+
 # Configuración
 language: en            # "en" = mercado global (recomendado) | "es"
 privacy_status: private # cambia a "public" cuando Google apruebe la auditoría API
