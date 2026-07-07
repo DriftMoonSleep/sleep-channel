@@ -2,10 +2,13 @@
 
 Nota: hasta que Google apruebe la auditoría del proyecto API, todo vídeo
 subido por API queda BLOQUEADO EN PRIVADO por política de YouTube.
-El pipeline funciona igual; publicar son 2 clics en YouTube Studio.
+
+La metadata se intenta en "escalera": si la API rechaza algún campo opcional
+(p. ej. containsSyntheticMedia según versión de la API), se reintenta sin él.
 """
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 
@@ -26,50 +29,68 @@ def _youtube():
     return build("youtube", "v3", credentials=creds)
 
 
+# Campos opcionales que se retiran en orden si la API devuelve 400
+_DROP_LADDER = [
+    [],
+    ["status.containsSyntheticMedia"],
+    ["status.containsSyntheticMedia",
+     "snippet.defaultAudioLanguage", "snippet.defaultLanguage"],
+]
+
+
 def upload_video(video: Path, thumb: Path, meta: dict, privacy: str = "private",
                  lang: str = "en") -> str:
     yt = _youtube()
-    status = {
-        "privacyStatus": privacy,
-        "selfDeclaredMadeForKids": False,
-        "containsSyntheticMedia": True,   # divulgación de contenido sintético
-    }
     body = {
         "snippet": {
             "title": meta["title"],
             "description": meta["description"],
-            "tags": meta["tags"],
+            "tags": [str(t) for t in meta["tags"]],
             "categoryId": "10",  # Música
             "defaultLanguage": lang,
             "defaultAudioLanguage": "zxx",  # sin habla
         },
-        "status": status,
+        "status": {
+            "privacyStatus": privacy,
+            "selfDeclaredMadeForKids": False,
+            "containsSyntheticMedia": True,  # divulgación de contenido sintético
+        },
     }
-    media = MediaFileUpload(str(video), chunksize=16 * 1024 * 1024, resumable=True)
 
-    def _insert():
-        req = yt.videos().insert(part="snippet,status", body=body, media_body=media)
-        resp = None
-        while resp is None:
-            progress, resp = req.next_chunk()
-            if progress:
-                print(f"  subida: {int(progress.progress() * 100)}%", flush=True)
-        return resp
-
-    try:
-        resp = _insert()
-    except HttpError as e:
-        # compatibilidad: si el campo de divulgación aún no existe en la API
-        if b"containsSyntheticMedia" in e.content:
-            status.pop("containsSyntheticMedia", None)
-            resp = _insert()
-        else:
+    resp = None
+    last_error = None
+    for drop in _DROP_LADDER:
+        b = copy.deepcopy(body)
+        for path in drop:
+            section, key = path.split(".")
+            b[section].pop(key, None)
+        media = MediaFileUpload(str(video), chunksize=16 * 1024 * 1024,
+                                resumable=True)
+        req = yt.videos().insert(part="snippet,status", body=b, media_body=media)
+        try:
+            resp = None
+            while resp is None:
+                progress, resp = req.next_chunk()
+                if progress:
+                    print(f"  subida: {int(progress.progress() * 100)}%", flush=True)
+            if drop:
+                print(f"  aviso: la API rechazó estos campos y se omitieron: {drop}")
+            break
+        except HttpError as e:
+            last_error = e
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status == 400 and drop != _DROP_LADDER[-1]:
+                print(f"  metadata rechazada (400) con drop={drop}; "
+                      "reintentando con menos campos opcionales…", flush=True)
+                continue
             raise
+    if resp is None:
+        raise last_error
 
     vid = resp["id"]
     try:
         yt.thumbnails().set(videoId=vid, media_body=str(thumb)).execute()
     except HttpError as e:
-        print(f"  aviso: miniatura no aplicada ({e.status_code}); "
+        print(f"  aviso: miniatura no aplicada ({getattr(e, 'status_code', '?')}); "
               "requiere cuenta verificada por teléfono en youtube.com/verify")
     return f"https://youtu.be/{vid}"
