@@ -28,6 +28,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Instalar ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
       - run: pip install -r requirements.txt
       - name: Generar y subir
         env:
