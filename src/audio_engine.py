@@ -75,13 +75,13 @@ def brown_noise(n: int, rng: np.random.Generator) -> np.ndarray:
 
 def rain(n: int, rng: np.random.Generator) -> np.ndarray:
     """Lluvia: lecho de ruido + gotas individuales dispersas."""
-    bed_hi = bandpass(_white(n, rng), 1800, 8000) * 0.8
-    bed_lo = bandpass(_white(n, rng), 150, 900) * 0.55        # cuerpo/rumor
+    bed_hi = bandpass(_white(n, rng), 1500, 9000) * 0.95      # hiss = carácter lluvia
+    bed_lo = bandpass(_white(n, rng), 150, 700) * 0.40         # cuerpo/rumor
     bed = bed_hi + bed_lo
     bed *= _slow_env(n, rng, 0.05, floor=0.75)                 # intensidad variable
 
     drops = np.zeros(n, dtype=np.float32)
-    rate = rng.uniform(9, 16)                                  # gotas audibles/seg
+    rate = rng.uniform(12, 20)                                 # gotas audibles/seg
     k = int(n / SR * rate)
     for _ in range(k):
         dur = int(SR * rng.uniform(0.004, 0.03))
@@ -93,7 +93,7 @@ def rain(n: int, rng: np.random.Generator) -> np.ndarray:
         burst = bandpass(burst, lo, min(lo * rng.uniform(1.5, 2.5), 15000), order=1)
         drops[i:i + dur] += burst * rng.uniform(0.15, 0.7)
 
-    return _norm(bed + drops * 0.9)
+    return _norm(bed + drops * 1.1)
 
 
 def ocean(n: int, rng: np.random.Generator) -> np.ndarray:
@@ -171,64 +171,106 @@ def pads(n: int, rng: np.random.Generator) -> np.ndarray:
 # Capas nuevas (2026-07-07)
 # ----------------------------------------------------------------------
 def thunder(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Truenos lejanos esporádicos. Capa de eventos: NO se normaliza globalmente
-    (el silencio entre truenos es parte del diseño)."""
+    """Truenos lejanos: retumbo con cuerpo en medios (audible en cualquier
+    altavoz), chasquido inicial y eco rodante. Capa de eventos sin normalizar."""
     out = np.zeros(n, dtype=np.float32)
-    t_pos = rng.uniform(15, 50) * SR
-    while t_pos < n - SR * 12:
-        dur = int(SR * rng.uniform(4, 9))
+
+    def _one_rumble(dur: int, brightness: float) -> np.ndarray:
         tt = np.arange(dur, dtype=np.float32)
-        attack = 1 - np.exp(-tt / (SR * rng.uniform(0.08, 0.35)))
-        decay = np.exp(-tt / (dur * rng.uniform(0.18, 0.30)))
-        rumble = lowpass(rng.standard_normal(dur).astype(np.float32),
-                         rng.uniform(60, 110)) * attack * decay
-        rumble = _norm(rumble, -14)
-        if rng.random() < 0.6:  # chasquido inicial ocasional
-            cd = int(SR * rng.uniform(0.15, 0.4))
-            ce = np.exp(-np.arange(cd, dtype=np.float32) / (cd * 0.25))
-            crack = bandpass(rng.standard_normal(cd).astype(np.float32),
-                             120, 900, order=2) * ce
-            rumble[:cd] += _norm(crack, -16)[:cd] * 0.5
+        attack = 1 - np.exp(-tt / (SR * rng.uniform(0.06, 0.25)))
+        decay = np.exp(-tt / (dur * rng.uniform(0.20, 0.32)))
+        low = lowpass(rng.standard_normal(dur).astype(np.float32),
+                      rng.uniform(70, 130))
+        mid = bandpass(rng.standard_normal(dur).astype(np.float32),
+                       150, 450, order=2)
+        r = (low + mid * brightness) * attack * decay
+        return _norm(r, -13)
+
+    t_pos = rng.uniform(8, 25) * SR
+    while t_pos < n - SR * 16:
         i = int(t_pos)
-        out[i:i + dur] += rumble * rng.uniform(0.5, 1.0)
-        t_pos += rng.uniform(25, 90) * SR
+        dur = int(SR * rng.uniform(3.5, 7))
+        main = _one_rumble(dur, rng.uniform(0.5, 0.8))
+        # chasquido inicial casi siempre (es lo que "anuncia" el trueno)
+        if rng.random() < 0.85:
+            cd = int(SR * rng.uniform(0.2, 0.5))
+            ce = np.exp(-np.arange(cd, dtype=np.float32) / (cd * 0.3))
+            crack = bandpass(rng.standard_normal(cd).astype(np.float32),
+                             250, 1400, order=2) * ce
+            main[:cd] += _norm(crack, -15)[:cd] * 0.7
+        out[i:i + dur] += main * rng.uniform(0.7, 1.0)
+        # eco rodante: segundo retumbo más suave 1.5-3.5 s después
+        if rng.random() < 0.7:
+            gap = int(SR * rng.uniform(1.5, 3.5))
+            dur2 = int(SR * rng.uniform(2.5, 5))
+            j = i + gap
+            if j + dur2 < n:
+                out[j:j + dur2] += _one_rumble(dur2, rng.uniform(0.3, 0.5)) * rng.uniform(0.35, 0.55)
+        t_pos += rng.uniform(18, 55) * SR
     return np.clip(out, -1, 1)
 
 
 def fireplace(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Chimenea: rumor grave + crujidos en ráfagas + siseo suave."""
-    rumor = lowpass(brown_noise(n, rng), 300) * 0.9
+    """Hoguera: roar de llama con flutter + crujidos resonantes con cuerpo
+    (senos amortiguados, no impulsos) + pops graves ocasionales."""
+    # llama: rumor grave con aleteo lento característico
+    flame = lowpass(_white(n, rng), 380)
+    t = np.arange(n, dtype=np.float32) / SR
+    flutter = 1 + 0.18 * np.sin(2 * np.pi * rng.uniform(5, 9) * t) \
+                * _slow_env(n, rng, 0.15, floor=0.3)
+    flame = _norm(flame * flutter, -21)
+
+    def _crackle(dur: int, f: float, noise_mix: float) -> np.ndarray:
+        tt = np.arange(dur, dtype=np.float32) / SR
+        env = np.exp(-tt / (dur / SR * rng.uniform(0.15, 0.35)))
+        tone = np.sin(2 * np.pi * f * tt + rng.uniform(0, 6.28)).astype(np.float32)
+        nz = bandpass(rng.standard_normal(dur).astype(np.float32),
+                      f * 0.6, min(f * 1.8, 9000), order=1)
+        return (tone * (1 - noise_mix) + nz * noise_mix) * env
 
     crackles = np.zeros(n, dtype=np.float32)
-    i = int(rng.uniform(0, 0.3) * SR)
+    i = int(rng.uniform(0.2, 0.8) * SR)
     while i < n - SR:
-        burst_len = int(rng.integers(1, 7))            # pops por ráfaga
-        for _ in range(burst_len):
-            dur = int(SR * rng.uniform(0.001, 0.006))
-            if i + dur >= n:
-                break
-            env = np.exp(-np.arange(dur, dtype=np.float32) / (dur * rng.uniform(0.2, 0.5)))
-            pop = rng.standard_normal(dur).astype(np.float32) * env
-            pop = highpass(pop, rng.uniform(900, 2000), order=1)
-            crackles[i:i + dur] += pop * rng.uniform(0.15, 0.85)
-            i += int(SR * rng.uniform(0.012, 0.09))    # separación dentro de ráfaga
-        i += int(SR * rng.uniform(0.08, 0.7))          # separación entre ráfagas
+        # crujido con cuerpo: 8-40 ms, resonancia 800-2600 Hz
+        dur = int(SR * rng.uniform(0.008, 0.040))
+        c = _crackle(dur, rng.uniform(800, 2600), rng.uniform(0.3, 0.6))
+        crackles[i:i + dur] += c * rng.uniform(0.10, 0.45)
+        # a veces una mini-ráfaga pegada (madera que se parte)
+        if rng.random() < 0.30:
+            for _ in range(int(rng.integers(1, 4))):
+                i += int(SR * rng.uniform(0.03, 0.12))
+                dur = int(SR * rng.uniform(0.006, 0.025))
+                if i + dur >= n:
+                    break
+                c = _crackle(dur, rng.uniform(1000, 3000), rng.uniform(0.3, 0.6))
+                crackles[i:i + dur] += c * rng.uniform(0.08, 0.35)
+        i += int(SR * rng.uniform(0.25, 0.9))          # 1-4 crujidos/seg
 
-    hiss = bandpass(_white(n, rng), 2500, 7000) * _slow_env(n, rng, 0.08, floor=0.2) * 0.10
-    return _norm(rumor + crackles * 1.1 + hiss)
+    # pops graves ocasionales ("thunk" de tronco)
+    pops = np.zeros(n, dtype=np.float32)
+    i = int(rng.uniform(2, 6) * SR)
+    while i < n - SR:
+        dur = int(SR * rng.uniform(0.04, 0.09))
+        p = _crackle(dur, rng.uniform(140, 380), 0.25)
+        pops[i:i + dur] += p * rng.uniform(0.25, 0.5)
+        i += int(SR * rng.uniform(3, 10))
+
+    hiss = bandpass(_white(n, rng), 2500, 6500) * _slow_env(n, rng, 0.1, floor=0.3) * 0.05
+    mix = flame * 1.0 + crackles * 0.9 + pops * 0.9 + hiss
+    return _norm(mix)
 
 
 def crickets(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Grillos nocturnos: varios individuos con chirridos AM periódicos."""
+    """Grillos nocturnos: pocos individuos, cadencia tranquila."""
     out = np.zeros(n, dtype=np.float32)
-    for _ in range(int(rng.integers(4, 8))):
-        f0 = rng.uniform(3800, 5200)
-        pulse_rate = rng.uniform(28, 48)
-        period = rng.uniform(0.9, 2.4)
-        gain = rng.uniform(0.10, 0.28)
+    for _ in range(int(rng.integers(2, 4))):           # 2-3 grillos
+        f0 = rng.uniform(3600, 4600)
+        pulse_rate = rng.uniform(24, 38)
+        period = rng.uniform(1.6, 3.2)                 # más pausa entre chirps
+        gain = rng.uniform(0.08, 0.16)
         pos = rng.uniform(0, period) * SR
         while pos < n - SR:
-            dur = int(SR * rng.uniform(0.3, 0.8))
+            dur = int(SR * rng.uniform(0.25, 0.6))
             if pos + dur >= n:
                 break
             tt = np.arange(dur, dtype=np.float64) / SR
@@ -237,9 +279,9 @@ def crickets(n: int, rng: np.random.Generator) -> np.ndarray:
             chirp = np.sin(2 * np.pi * f0 * tt) * am * hann * gain
             i = int(pos)
             out[i:i + dur] += chirp.astype(np.float32)
-            pos += period * SR * rng.uniform(0.85, 1.2)
-    out = lowpass(out, 6500, order=2)                   # lima la aspereza
-    return _norm(out)
+            pos += period * SR * rng.uniform(0.9, 1.3)
+    out = lowpass(out, 5200, order=2)                  # lima la aspereza
+    return _norm(out, -23)                             # más discretos en la mezcla
 
 
 # ----------------------------------------------------------------------
@@ -252,10 +294,10 @@ THEMES = {
     "night_wind":     [(wind, 0.85), (brown_noise, 0.30)],
     "dream_pads":     [(pads, 0.95), (brown_noise, 0.12)],
     "rain_and_pads":  [(rain, 0.55), (pads, 0.60)],
-    "thunder_rain":   [(rain, 0.80), (thunder, 0.95), (brown_noise, 0.20)],
+    "thunder_rain":   [(rain, 1.00), (thunder, 1.10), (brown_noise, 0.10)],
     "fireplace":      [(fireplace, 1.00)],
     "rain_fireplace": [(rain, 0.55), (fireplace, 0.75)],
-    "crickets_night": [(crickets, 0.55), (wind, 0.30), (brown_noise, 0.22)],
+    "crickets_night": [(crickets, 0.60), (wind, 0.25), (brown_noise, 0.25)],
 }
 
 
