@@ -65,6 +65,8 @@ def main():
     upload_url = upload_video(video, thumb_path, meta,
                               privacy=cfg.get("privacy_status", "private"), lang=lang)
     print(f"      publicado: {upload_url}")
+    (work / "last_upload.txt").write_text(f"{meta['title']}\n{upload_url}\n",
+                                          encoding="utf-8")
 
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

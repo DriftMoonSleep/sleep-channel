@@ -27,6 +27,10 @@ THEME_WORDS = {
     "night_wind":    ("WIND", "Viento nocturno"),
     "dream_pads":    ("AMBIENT", "Ambient onírico"),
     "rain_and_pads": ("RAIN + AMBIENT", "Lluvia y ambient"),
+    "thunder_rain": ("RAIN & THUNDER", "Lluvia y truenos"),
+    "fireplace": ("FIREPLACE", "Chimenea"),
+    "rain_fireplace": ("RAIN + FIREPLACE", "Lluvia y chimenea"),
+    "crickets_night": ("NIGHT CRICKETS", "Grillos nocturnos"),
 }
 
 
@@ -110,7 +114,10 @@ def _grain(img: Image.Image, rng: np.random.Generator):
 
 def render_scene(seed: int, theme: str) -> Image.Image:
     rng = np.random.default_rng(seed)
-    top, bottom, accent = PALETTES[int(rng.integers(0, len(PALETTES)))]
+    if theme in ("fireplace", "rain_fireplace"):
+        top, bottom, accent = PALETTES[int(rng.choice([2, 5]))]  # paletas cálidas
+    else:
+        top, bottom, accent = PALETTES[int(rng.integers(0, len(PALETTES)))]
     horizon = int(H * rng.uniform(0.58, 0.72))
     img = Image.new("RGBA", (W, H))
     _sky(ImageDraw.Draw(img), top, bottom, horizon)

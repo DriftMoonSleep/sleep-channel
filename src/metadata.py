@@ -16,6 +16,10 @@ THEME_NAMES = {
         "night_wind": "Night Wind Sounds",
         "dream_pads": "Dreamy Ambient Music",
         "rain_and_pads": "Rain & Ambient Music",
+        "thunder_rain": "Rain & Distant Thunder",
+        "fireplace": "Crackling Fireplace Sounds",
+        "rain_fireplace": "Rain & Fireplace Sounds",
+        "crickets_night": "Night Crickets",
     },
     "es": {
         "gentle_rain": "Sonido de Lluvia Suave",
@@ -24,6 +28,10 @@ THEME_NAMES = {
         "night_wind": "Viento Nocturno",
         "dream_pads": "Música Ambient para Soñar",
         "rain_and_pads": "Lluvia y Música Ambient",
+        "thunder_rain": "Lluvia y Truenos Lejanos",
+        "fireplace": "Chimenea Crepitante",
+        "rain_fireplace": "Lluvia y Chimenea",
+        "crickets_night": "Grillos Nocturnos",
     },
 }
 

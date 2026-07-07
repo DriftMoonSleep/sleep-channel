@@ -3,6 +3,9 @@
 Genera un segmento loopeable (sin costura audible) que luego se repite
 hasta la duración objetivo del vídeo. Todo es síntesis matemática:
 sin muestras externas, sin copyright, coste cero.
+
+Temas: lluvia, ruido marrón, olas, viento, pads ambient, lluvia+pads,
+lluvia+truenos, chimenea, lluvia+chimenea, grillos nocturnos.
 """
 from __future__ import annotations
 
@@ -59,7 +62,7 @@ def _slow_env(n: int, rng: np.random.Generator, hz: float, floor: float = 0.0) -
 
 
 # ----------------------------------------------------------------------
-# Capas
+# Capas base
 # ----------------------------------------------------------------------
 def brown_noise(n: int, rng: np.random.Generator) -> np.ndarray:
     """Ruido marrón profundo (integrador con fugas, sin deriva DC)."""
@@ -126,7 +129,7 @@ _CHORDS = [
 
 
 def pads(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Drone armónico lento con voces desafinadas y reverb sintética."""
+    """Drone armónico lento: voces desafinadas + sub-drone + shimmer + reverb."""
     root = rng.uniform(98.0, 165.0)          # G2..E3 aprox
     seq_len = rng.integers(2, 5)
     seq = [_CHORDS[rng.integers(0, len(_CHORDS))] for _ in range(seq_len)]
@@ -137,7 +140,6 @@ def pads(n: int, rng: np.random.Generator) -> np.ndarray:
     out = np.zeros(n, dtype=np.float32)
     total = hold * seq_len
     for ci, chord in enumerate(seq):
-        # envolvente trapezoidal del acorde (se repite cíclicamente)
         pos = (t - ci * hold) % total
         env = np.clip(np.minimum(pos / xf, (hold + xf - pos) / xf), 0, 1)
         env = (env ** 2).astype(np.float32)
@@ -148,8 +150,12 @@ def pads(n: int, rng: np.random.Generator) -> np.ndarray:
                 v = np.sin(2 * np.pi * f * det * t + ph)
                 v += 0.30 * np.sin(2 * np.pi * 2 * f * det * t + ph)
                 v += 0.10 * np.sin(2 * np.pi * 3 * f * det * t + ph)
+                v += 0.05 * np.sin(2 * np.pi * 4 * f * det * t + ph)   # shimmer
                 trem = 1 + 0.12 * np.sin(2 * np.pi * rng.uniform(0.05, 0.09) * t + rng.uniform(0, 6.28))
                 out += (v * trem).astype(np.float32) * env * (0.9 / (len(chord) * 3))
+
+    # Sub-drone continuo una octava por debajo de la raíz
+    out += (0.20 * np.sin(2 * np.pi * (root / 2) * t)).astype(np.float32)
 
     # Reverb: convolución con IR exponencial sintética
     ir_len = int(SR * 2.8)
@@ -158,19 +164,98 @@ def pads(n: int, rng: np.random.Generator) -> np.ndarray:
     )
     ir /= np.sqrt(np.sum(ir**2)) + 1e-9
     wet = signal.oaconvolve(out, ir)[:n].astype(np.float32)
-    return _norm(out * 0.55 + wet * 0.45)
+    return _norm(out * 0.5 + wet * 0.5)
+
+
+# ----------------------------------------------------------------------
+# Capas nuevas (2026-07-07)
+# ----------------------------------------------------------------------
+def thunder(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Truenos lejanos esporádicos. Capa de eventos: NO se normaliza globalmente
+    (el silencio entre truenos es parte del diseño)."""
+    out = np.zeros(n, dtype=np.float32)
+    t_pos = rng.uniform(15, 50) * SR
+    while t_pos < n - SR * 12:
+        dur = int(SR * rng.uniform(4, 9))
+        tt = np.arange(dur, dtype=np.float32)
+        attack = 1 - np.exp(-tt / (SR * rng.uniform(0.08, 0.35)))
+        decay = np.exp(-tt / (dur * rng.uniform(0.18, 0.30)))
+        rumble = lowpass(rng.standard_normal(dur).astype(np.float32),
+                         rng.uniform(60, 110)) * attack * decay
+        rumble = _norm(rumble, -14)
+        if rng.random() < 0.6:  # chasquido inicial ocasional
+            cd = int(SR * rng.uniform(0.15, 0.4))
+            ce = np.exp(-np.arange(cd, dtype=np.float32) / (cd * 0.25))
+            crack = bandpass(rng.standard_normal(cd).astype(np.float32),
+                             120, 900, order=2) * ce
+            rumble[:cd] += _norm(crack, -16)[:cd] * 0.5
+        i = int(t_pos)
+        out[i:i + dur] += rumble * rng.uniform(0.5, 1.0)
+        t_pos += rng.uniform(25, 90) * SR
+    return np.clip(out, -1, 1)
+
+
+def fireplace(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Chimenea: rumor grave + crujidos en ráfagas + siseo suave."""
+    rumor = lowpass(brown_noise(n, rng), 300) * 0.9
+
+    crackles = np.zeros(n, dtype=np.float32)
+    i = int(rng.uniform(0, 0.3) * SR)
+    while i < n - SR:
+        burst_len = int(rng.integers(1, 7))            # pops por ráfaga
+        for _ in range(burst_len):
+            dur = int(SR * rng.uniform(0.001, 0.006))
+            if i + dur >= n:
+                break
+            env = np.exp(-np.arange(dur, dtype=np.float32) / (dur * rng.uniform(0.2, 0.5)))
+            pop = rng.standard_normal(dur).astype(np.float32) * env
+            pop = highpass(pop, rng.uniform(900, 2000), order=1)
+            crackles[i:i + dur] += pop * rng.uniform(0.15, 0.85)
+            i += int(SR * rng.uniform(0.012, 0.09))    # separación dentro de ráfaga
+        i += int(SR * rng.uniform(0.08, 0.7))          # separación entre ráfagas
+
+    hiss = bandpass(_white(n, rng), 2500, 7000) * _slow_env(n, rng, 0.08, floor=0.2) * 0.10
+    return _norm(rumor + crackles * 1.1 + hiss)
+
+
+def crickets(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Grillos nocturnos: varios individuos con chirridos AM periódicos."""
+    out = np.zeros(n, dtype=np.float32)
+    for _ in range(int(rng.integers(4, 8))):
+        f0 = rng.uniform(3800, 5200)
+        pulse_rate = rng.uniform(28, 48)
+        period = rng.uniform(0.9, 2.4)
+        gain = rng.uniform(0.10, 0.28)
+        pos = rng.uniform(0, period) * SR
+        while pos < n - SR:
+            dur = int(SR * rng.uniform(0.3, 0.8))
+            if pos + dur >= n:
+                break
+            tt = np.arange(dur, dtype=np.float64) / SR
+            am = np.clip(np.sin(2 * np.pi * pulse_rate * tt), 0, None) ** 2
+            hann = np.hanning(dur)
+            chirp = np.sin(2 * np.pi * f0 * tt) * am * hann * gain
+            i = int(pos)
+            out[i:i + dur] += chirp.astype(np.float32)
+            pos += period * SR * rng.uniform(0.85, 1.2)
+    out = lowpass(out, 6500, order=2)                   # lima la aspereza
+    return _norm(out)
 
 
 # ----------------------------------------------------------------------
 # Temas (recetas de mezcla)
 # ----------------------------------------------------------------------
 THEMES = {
-    "gentle_rain":  [(rain, 0.90), (brown_noise, 0.22)],
-    "ocean_waves":  [(ocean, 0.90), (wind, 0.18)],
-    "deep_brown":   [(brown_noise, 1.00)],
-    "night_wind":   [(wind, 0.85), (brown_noise, 0.30)],
-    "dream_pads":   [(pads, 0.95), (brown_noise, 0.12)],
-    "rain_and_pads": [(rain, 0.55), (pads, 0.60)],
+    "gentle_rain":    [(rain, 0.90), (brown_noise, 0.22)],
+    "ocean_waves":    [(ocean, 0.90), (wind, 0.18)],
+    "deep_brown":     [(brown_noise, 1.00)],
+    "night_wind":     [(wind, 0.85), (brown_noise, 0.30)],
+    "dream_pads":     [(pads, 0.95), (brown_noise, 0.12)],
+    "rain_and_pads":  [(rain, 0.55), (pads, 0.60)],
+    "thunder_rain":   [(rain, 0.80), (thunder, 0.95), (brown_noise, 0.20)],
+    "fireplace":      [(fireplace, 1.00)],
+    "rain_fireplace": [(rain, 0.55), (fireplace, 0.75)],
+    "crickets_night": [(crickets, 0.55), (wind, 0.30), (brown_noise, 0.22)],
 }
 
 

@@ -18,6 +18,10 @@ on:
         required: false
         default: "0"
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
@@ -40,6 +44,16 @@ jobs:
           HOURS_OVERRIDE: ${{ github.event.inputs.hours }}
           SKIP_UPLOAD: ${{ github.event.inputs.skip_upload }}
         run: python -m src.main
+      - name: Avisar con una issue (vídeo listo para publicar)
+        if: ${{ success() && github.event.inputs.skip_upload != '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE=$(head -1 out/last_upload.txt)
+          URL=$(sed -n 2p out/last_upload.txt)
+          gh issue create -R "$GITHUB_REPOSITORY" \
+            --title "📼 Publicar: $TITLE" \
+            --body "Vídeo subido en privado: $URL — Publícalo desde YouTube Studio (visibilidad → Público) y cierra esta issue."
       - name: Guardar muestras descargables (solo modo prueba)
         if: ${{ github.event.inputs.skip_upload == '1' }}
         uses: actions/upload-artifact@v4
