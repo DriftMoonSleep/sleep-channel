@@ -1,0 +1,24 @@
+# Identidad del canal
+channel_name: Driftmoon Sleep
+handle: "@driftmoonsleep"
+email_sugerido: driftmoonsleep@gmail.com
+tagline: "Rain · Ocean · Deep-Sleep Soundscapes"
+
+# Configuración
+language: en            # "en" = mercado global (recomendado) | "es"
+privacy_status: private # cambia a "public" cuando Google apruebe la auditoría API
+segment_minutes: 14     # minutos de audio único (se loopea sin costura)
+seed_salt: 0            # cambia este número si algún día quieres regenerar distinto
+black_screen_minutes: 10 # el vídeo se funde a negro en este minuto (0 = nunca)
+
+# Rotación de temas (ejecución N → tema N % len)
+themes:
+  - gentle_rain
+  - deep_brown
+  - ocean_waves
+  - dream_pads
+  - night_wind
+  - rain_and_pads
+
+# Rotación de duraciones en horas
+hours_pool: [3, 8, 3, 8, 3, 8, 10]

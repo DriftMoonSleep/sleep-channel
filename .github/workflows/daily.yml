@@ -1,0 +1,50 @@
+name: Vídeo diario
+
+on:
+  schedule:
+    # Mes 1: 4 vídeos/semana (dom, lun, mié, vie) para no disparar la señal
+    # de "cadencia anormal" en canal nuevo. Mes 2: cambia a "0 17 * * *" (diario).
+    - cron: "0 17 * * 0,1,3,5"   # 19:00 España (verano); UTC en GitHub
+  workflow_dispatch:
+    inputs:
+      theme:
+        description: "Tema (vacío = rotación automática)"
+        required: false
+      hours:
+        description: "Horas de duración (vacío = rotación)"
+        required: false
+      skip_upload:
+        description: "Solo generar, no subir (1 = sí)"
+        required: false
+        default: "0"
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Generar y subir
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          THEME_OVERRIDE: ${{ github.event.inputs.theme }}
+          HOURS_OVERRIDE: ${{ github.event.inputs.hours }}
+          SKIP_UPLOAD: ${{ github.event.inputs.skip_upload }}
+        run: python -m src.main
+      - name: Guardar muestras descargables (solo modo prueba)
+        if: ${{ github.event.inputs.skip_upload == '1' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: muestras
+          retention-days: 3
+          path: |
+            out/segment.m4a
+            out/scene.png
+            out/thumb.jpg
